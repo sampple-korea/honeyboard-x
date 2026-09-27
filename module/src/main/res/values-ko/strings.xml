@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">HoneyBoard X</string>
+    <string name="module_description">Rambler 음성 입력과 Codex 번역을 삼성 키보드에 통합합니다. Made by sampple-korea</string>
+</resources>

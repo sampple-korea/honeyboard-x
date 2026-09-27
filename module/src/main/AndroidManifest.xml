@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.sampple.honeyboardx">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <queries><package android:name="com.samsung.android.honeyboard" /></queries>
+    <application android:name="dev.sampple.rambler.SettingsBridge"
+        android:label="@string/app_name" android:description="@string/module_description"
+        android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher"
+        android:theme="@android:style/Theme.DeviceDefault.DayNight" android:allowBackup="false">
+        <activity android:name="dev.sampple.rambler.SettingsActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
+            <intent-filter><action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+            <intent-filter><action android:name="android.intent.action.MAIN" />
+                <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" /></intent-filter>
+        </activity>
+        <provider android:name="io.github.libxposed.service.XposedProvider"
+            android:authorities="dev.sampple.honeyboardx.XposedService" android:exported="true" />
+        <provider android:name="dev.sampple.rambler.translation.CodexBridgeProvider"
+            android:authorities="dev.sampple.honeyboardx.bridge" android:exported="true"
+            android:grantUriPermissions="true" />
+    </application>
+</manifest>

@@ -1,0 +1,19 @@
+# Reverse-engineering inputs and extracted references
+/reverse-engineering/
+/input-apks/
+/docs/reference/
+
+# Android build outputs and packaged apps
+*.apk
+*.idsig
+/module/build/
+/module/tools/out/
+
+# Local signing keys and machine-specific configuration
+*.keystore
+*.jks
+.DS_Store
+local.properties
+
+# Local secrets (Gboard API key for builds)
+/module/local.keys
