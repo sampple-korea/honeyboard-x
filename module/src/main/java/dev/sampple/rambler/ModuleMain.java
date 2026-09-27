@@ -34,6 +34,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.WeakHashMap;
@@ -49,6 +50,7 @@ public final class ModuleMain extends XposedModule {
     private final Set<ClassLoader> installed = Collections.newSetFromMap(new WeakHashMap<>());
     private final Set<Object> ownInfo = Collections.newSetFromMap(new WeakHashMap<>());
     private final List<Registration> registrations = new ArrayList<>();
+    private final Map<Object, String> beeStates = new WeakHashMap<>();
     private WeakReference<InputMethodService> service = new WeakReference<>(null);
     private WeakReference<View> root = new WeakReference<>(null);
     private WeakReference<Object> boardConfig = new WeakReference<>(null);
@@ -87,6 +89,7 @@ public final class ModuleMain extends XposedModule {
             installSwitches(cl);
             installPlacement(cl);
             installQueen(cl);
+            installBeeLifecycle(cl);
         } catch (Throwable t) { report("package setup", t); }
     }
 
@@ -112,7 +115,7 @@ public final class ModuleMain extends XposedModule {
     /** proceed is deliberately OUTSIDE all module catch blocks: original exceptions propagate. */
     private void observe(Executable target, boolean before, Observation callback) {
         target.setAccessible(true);
-        hook(target).setId("rambler:" + target.toString())
+        hook(target).setId("rambler:" + target + (before ? ":before" : ":after"))
                 .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE).intercept(chain -> {
                     if (before) guard("before " + target.getName(), () -> callback.accept(chain, null));
                     Object result = chain.proceed();
@@ -184,6 +187,62 @@ public final class ModuleMain extends XposedModule {
         });
     }
 
+    private void installBeeLifecycle(ClassLoader cl) {
+        guard("beehive rebuild hook", () -> {
+            Class<?> component = type(cl, "X9.e");
+            observe(method(component, "r"), true, (chain, result) -> {
+                // r() snapshots queen.e() BEFORE na.b.initialize(); a posted repair is too late.
+                for (Object queen : (List<?>) field(chain.getThisObject(), "n", "f13945n")) {
+                    if (type(cl, TARGET + ".bee.b").isInstance(queen)) {
+                        Context context = (Context) field(queen, "a", "f22237a");
+                        register(queen, context, cl);
+                    }
+                }
+            });
+            observe(method(component, "r"), false, (chain, result) ->
+                    traceBeeState("rebuild", field(chain.getThisObject(), "k", "f13942k")));
+        });
+        Class<?> model;
+        try { model = type(cl, TARGET + ".beehive.viewmodel.K"); }
+        catch (Throwable t) { report("beehive diagnostics", t); return; }
+        guard("beehive save hook", () -> observe(method(model, "w"), false,
+                (chain, result) -> traceBeeState("save", chain.getThisObject())));
+        guard("beehive edit hook", () -> observe(method(model, "v", String.class, boolean.class), false,
+                (chain, result) -> traceBeeState("edit/save", chain.getThisObject())));
+        guard("beehive remove hook", () -> observe(method(model, "u", type(cl, "z6.c"), boolean.class), false,
+                (chain, result) -> {
+                    if (Boolean.TRUE.equals(result) && ID.equals(invoke(chain.getArg(0), "getBeeId"))) {
+                        Log.i("HoneyBoardX", "Bee removed from BeeWorld");
+                        traceBeeState("remove", chain.getThisObject());
+                    }
+                }));
+        guard("beehive visibility hook", () -> observe(method(model, "x",
+                boolean.class, boolean.class, boolean.class, boolean.class), false,
+                (chain, result) -> traceBeeState("visibility", chain.getThisObject())));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void traceBeeState(String event, Object model) throws Throwable {
+        String position = "absent";
+        for (String name : new String[]{"t", "n", "o"}) {
+            Object collection = field(model, name);
+            List<?> list = "t".equals(name) ? (List<?>) collection : (List<?>) invoke(collection, "e");
+            for (Object item : list) {
+                if (ID.equals(invoke(item, "getBeeId"))) {
+                    position = ("t".equals(name) ? "primary" : "n".equals(name) ? "swarm" : "sleep")
+                            + ":" + list.indexOf(item) + ":vis=" + invoke(item, "getBeeVisibility");
+                    break;
+                }
+            }
+            if (!"absent".equals(position)) break;
+        }
+        Object settings = field(model, "a", "f22399a");
+        int rank = ((Number) call(method(settings.getClass(), "n", String.class), settings, ID)).intValue();
+        String state = position + ":rank=" + rank;
+        String previous = beeStates.put(model, state);
+        if (!state.equals(previous)) Log.i("HoneyBoardX", event + " " + state);
+    }
+
     @SuppressWarnings("unchecked")
     private void register(Object queen, Context context, ClassLoader cl) throws Throwable {
         if (!labelsReady) return; // Do not publish a partially initialized BeeInfo.
@@ -194,6 +253,13 @@ public final class ModuleMain extends XposedModule {
             bees = (List<Object>) field(queen, "d", "f22240d");
         }
         for (Object bee : bees) if (ID.equals(invoke(bee, "getBeeId"))) return;
+        for (Registration r : registrations) {
+            if (r.list.get() == bees && r.proxy.get() != null) {
+                Log.i("HoneyBoardX", "Bee missing from queen list=" + System.identityHashCode(bees)
+                        + "; re-registering");
+                break;
+            }
+        }
         Context app = context.getApplicationContext();
         if (app == null) app = context;
         Class<?> iface = type(cl, "z6.c");
@@ -215,13 +281,16 @@ public final class ModuleMain extends XposedModule {
         Bee handler = new Bee(info);
         Object proxy = Proxy.newProxyInstance(iface.getClassLoader(), new Class<?>[]{iface}, handler::dispatch);
         Registration registration = new Registration(bees, proxy, handler, app);
+        registrations.removeIf(r -> r.list.get() == null || r.proxy.get() == null);
+        registrations.add(registration);
         // If QueenBee appeared after na.b.initialize(), seed rank before its
         // ObservableList callback builds the BeeItem; otherwise a full primary
         // silently sends an unranked Bee to the overflow menu.
-        registrations.add(registration); // Track even if an ObservableList callback throws after mutation.
         Object settings = toolbarSettings.get();
         if (settings != null) guard("late toolbar placement", () -> placeOnce(settings, cl));
         bees.add(proxy);
+        Log.i("HoneyBoardX", "Bee registered queen=" + System.identityHashCode(queen)
+                + " list=" + System.identityHashCode(bees) + " size=" + bees.size());
     }
 
     private static Icon microphone() {
@@ -478,16 +547,19 @@ public final class ModuleMain extends XposedModule {
     }
 
     private void cleanupRegistrations() {
+        // PluginQueenBee belongs to Koin and can outlive HoneyBoardService. Removing
+        // our Bee here leaves the next X9.e with no entry until the process restarts.
         for (Registration r : registrations) {
-            guard("unregister Bee", () -> {
-                Bee bee = r.bee.get();
-                if (bee != null) bee.callback = null;
+            guard("retained Bee", () -> {
                 List<Object> list = r.list.get();
                 Object proxy = r.proxy.get();
-                if (list != null && proxy != null) list.remove(proxy);
+                if (list != null && proxy != null && list.contains(proxy))
+                    Log.i("HoneyBoardX", "service destroyed; retaining Bee in queen list="
+                            + System.identityHashCode(list));
             });
         }
         registrations.clear();
+        beeStates.clear();
     }
 
     private void installLanguage(ClassLoader cl) {

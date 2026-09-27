@@ -41,7 +41,7 @@ java -cp "$R8_JAR" com.android.tools.r8.D8 --release --min-api 31 \
 
 aapt package -f -M src/main/AndroidManifest.xml -S src/main/res -I "$SDK/android-31-aapt.jar" \
     -F "$OUT/apk/unaligned.apk" --min-sdk-version 31 --target-sdk-version 36 \
-    --version-code "${VERSION_CODE:-1}" --version-name "${VERSION_NAME:-1.0}"
+    --version-code "${VERSION_CODE:-2}" --version-name "${VERSION_NAME:-1.0.1}"
 
 mkdir -p "$OUT/apk/stage/META-INF/xposed"
 cp "$OUT/dex/classes.dex" "$OUT/apk/stage/"
